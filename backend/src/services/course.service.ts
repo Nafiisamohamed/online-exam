@@ -187,16 +187,16 @@ export async function importStudents(actor: AuthUser, csv: string, dryRun: boole
       .map((c) => c.trim().toUpperCase())
       .filter(Boolean);
     const errors: string[] = [];
-    if (!STUDENT_ID_RE.test(studentId)) errors.push('Invalid or missing student ID');
-    if (name.length < 3) errors.push('Name is required');
-    if (phone && !PHONE_RE.test(phone)) errors.push('Invalid phone number');
-    if (courseCodes.length === 0) errors.push('At least one course code is required');
-    courseCodes.filter((c) => !courseByCode.has(c)).forEach((c) => errors.push(`Unknown course code ${c}`));
+    if (!STUDENT_ID_RE.test(studentId)) errors.push('STUDENT_ID_INVALID');
+    if (name.length < 3) errors.push('NAME_REQUIRED');
+    if (phone && !PHONE_RE.test(phone)) errors.push('PHONE_INVALID');
+    if (courseCodes.length === 0) errors.push('COURSE_CODES_REQUIRED');
+    courseCodes.filter((c) => !courseByCode.has(c)).forEach((c) => errors.push(`UNKNOWN_COURSE:${c}`));
     const key = studentId.toUpperCase();
-    if (seen.has(key)) errors.push('Student ID repeated in this file');
+    if (seen.has(key)) errors.push('DUPLICATE_IN_FILE');
     seen.add(key);
     const ex = existingById.get(key);
-    if (ex && ex.role !== 'STUDENT') errors.push('ID belongs to a non-student account');
+    if (ex && ex.role !== 'STUDENT') errors.push('NOT_A_STUDENT');
     return { line, studentId, name, phone, courseCodes, status: errors.length ? 'ERROR' : ex ? 'EXISTING' : 'NEW', errors };
   });
 

@@ -970,4 +970,10 @@ export const questionErrorText: Record<string, { en: string; so: string }> = {
   INVALID_TYPE: { en: 'Type must be MCQ, TRUE_FALSE, SHORT_ANSWER or ESSAY', so: 'Nooca waa inuu noqdaa MCQ, TRUE_FALSE, SHORT_ANSWER ama ESSAY' },
   DUPLICATE_IN_BANK: { en: 'Same question already in the bank (skipped)', so: 'Su\'aashan horey ayay ugu jirtay kaydka (waa la dhaafay)' },
   DUPLICATE_IN_FILE: { en: 'Repeated in this file (skipped)', so: 'Faylkan ayay ku soo noqnoqotay (waa la dhaafay)' },
+  STUDENT_ID_INVALID: { en: 'Student ID is missing or invalid', so: 'Aqoonsiga ardayga waa maqan yahay ama ma saxna' },
+  NAME_REQUIRED: { en: 'Name is required', so: 'Magaca waa lagama maarmaan' },
+  PHONE_INVALID: { en: 'Phone number is not valid', so: 'Lambarka telefoonku ma saxna' },
+  COURSE_CODES_REQUIRED: { en: 'At least one course code is required', so: 'Ugu yaraan hal koodh koorso ayaa loo baahan yahay' },
+  UNKNOWN_COURSE: { en: 'Unknown course code', so: 'Koodh koorso aan la aqoon' },
+  NOT_A_STUDENT: { en: 'This ID belongs to a staff account', so: 'Aqoonsigan wuxuu ka mid yahay akoon shaqaale' },
 };

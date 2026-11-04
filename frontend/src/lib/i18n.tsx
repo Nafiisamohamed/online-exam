@@ -72,7 +72,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         if (err instanceof ApiError) return errorText[err.code]?.[lang] ?? err.message;
         return t('somethingWrong');
       },
-      questionError: (code: string) => questionErrorText[code]?.[lang] ?? code,
+      // Codes may carry a value after ":" (e.g. "UNKNOWN_COURSE:CS999").
+      questionError: (code: string) => {
+        const [key, value] = code.split(':');
+        const text = questionErrorText[key]?.[lang] ?? key;
+        return value ? `${text}: ${value}` : text;
+      },
       fmtDate: (d, withTime = true) => fmt(d, withTime ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' }),
       fmtTime: (d) => fmt(d, { timeStyle: 'short' }),
     };
