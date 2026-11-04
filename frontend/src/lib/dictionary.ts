@@ -374,6 +374,7 @@ export const en = {
   needsReview: 'Needs review',
   gradeSaved: 'Marks saved',
   allGraded: 'Everything is graded.',
+  gradingLocked: 'Results are published. Re-open grading on the results page to change marks.',
   showGraded: 'Show graded answers too',
   acceptedWere: 'Accepted answers: {list}',
 
@@ -814,6 +815,7 @@ export const so: Record<DictKey, string> = {
   needsReview: 'Waxay u baahan tahay dib-u-eegis',
   gradeSaved: 'Buundada waa la kaydiyay',
   allGraded: 'Wax walba waa la saxay.',
+  gradingLocked: 'Natiijooyinka waa la daabacay. Dib u fur sixidda bogga natiijooyinka si aad u beddesho buundada.',
   showGraded: 'Sidoo kale tus jawaabaha la saxay',
   acceptedWere: 'Jawaabaha la aqbalayo: {list}',
 
