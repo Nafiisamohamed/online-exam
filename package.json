@@ -8,7 +8,7 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace backend & npm run dev --workspace frontend",
+    "dev": "concurrently -n api,web -c green,cyan \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "dev:backend": "npm run dev --workspace backend",
     "dev:frontend": "npm run dev --workspace frontend",
     "db:migrate": "npm run db:migrate --workspace backend",
@@ -28,5 +28,8 @@
     "esbuild@0.25.12": true,
     "esbuild@0.28.2": true,
     "@embedded-postgres/windows-x64@17.6.0-beta.15": true
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
