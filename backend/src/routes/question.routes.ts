@@ -21,7 +21,9 @@ import * as questions from '../services/question.service';
 import { importQuestions, QUESTION_CSV_TEMPLATE } from '../services/questionImport.service';
 
 export const questionRouter = Router();
-questionRouter.use(authenticate, requireRole('LECTURER', 'ADMIN'));
+questionRouter.use(authenticate);
+// Role check is per route: this router shares the /api prefix with other routers.
+const lecturer = requireRole('LECTURER', 'ADMIN');
 
 export const questionInputSchema = z.object({
   type: zQuestionType,
@@ -37,7 +39,7 @@ export const questionInputSchema = z.object({
 
 const courseParam = z.object({ courseId: zId });
 
-questionRouter.get('/courses/:courseId/questions', async (req, res) => {
+questionRouter.get('/courses/:courseId/questions', lecturer, async (req, res) => {
   const { courseId } = parse(courseParam, req.params);
   const filter = parse(
     z.object({ type: zQuestionType.optional(), difficulty: zDifficulty.optional(), topic: z.string().max(60).optional(), search: z.string().max(100).optional() }),
@@ -46,39 +48,39 @@ questionRouter.get('/courses/:courseId/questions', async (req, res) => {
   res.json(await questions.listQuestions(currentUser(req), courseId, filter));
 });
 
-questionRouter.get('/courses/:courseId/bank-summary', async (req, res) => {
+questionRouter.get('/courses/:courseId/bank-summary', lecturer, async (req, res) => {
   const { courseId } = parse(courseParam, req.params);
   res.json(await questions.bankSummary(currentUser(req), courseId));
 });
 
-questionRouter.post('/courses/:courseId/questions', async (req, res) => {
+questionRouter.post('/courses/:courseId/questions', lecturer, async (req, res) => {
   const { courseId } = parse(courseParam, req.params);
   res.status(201).json(await questions.createQuestion(currentUser(req), courseId, parse(questionInputSchema, req.body)));
 });
 
-questionRouter.post('/courses/:courseId/questions/import', async (req, res) => {
+questionRouter.post('/courses/:courseId/questions/import', lecturer, async (req, res) => {
   const { courseId } = parse(courseParam, req.params);
   const body = parse(z.object({ csv: z.string().min(1).max(3_000_000), dryRun: z.boolean().default(true) }), req.body);
   res.json(await importQuestions(currentUser(req), courseId, body.csv, body.dryRun));
 });
 
-questionRouter.get('/questions/import/template', (_req, res) => {
+questionRouter.get('/questions/import/template', lecturer, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="imtixaan-questions-template.csv"');
   res.send(QUESTION_CSV_TEMPLATE);
 });
 
-questionRouter.get('/questions/:id', async (req, res) => {
+questionRouter.get('/questions/:id', lecturer, async (req, res) => {
   const { id } = parse(zIdParam, req.params);
   res.json(await questions.getQuestion(currentUser(req), id));
 });
 
-questionRouter.put('/questions/:id', async (req, res) => {
+questionRouter.put('/questions/:id', lecturer, async (req, res) => {
   const { id } = parse(zIdParam, req.params);
   res.json(await questions.updateQuestion(currentUser(req), id, parse(questionInputSchema, req.body)));
 });
 
-questionRouter.delete('/questions/:id', async (req, res) => {
+questionRouter.delete('/questions/:id', lecturer, async (req, res) => {
   const { id } = parse(zIdParam, req.params);
   await questions.archiveQuestion(currentUser(req), id);
   res.json({ ok: true });

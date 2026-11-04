@@ -34,6 +34,17 @@ describe('authentication and server-side permissions', () => {
     expect((await request(app).get(`/api/courses/${f.c1.id}/questions`).set(auth(lec1))).status).toBe(200);
     expect((await request(app).post('/api/courses').set(auth(lec1)).send({})).status).toBe(403);
   });
+
+  it('lets students and invigilators reach their shared endpoints', async () => {
+    const student = await login('T-001');
+    const inv = await login('inv1');
+    for (const token of [student, inv]) {
+      expect((await request(app).get('/api/notifications').set(auth(token))).status).toBe(200);
+      expect((await request(app).get('/api/payments/fees').set(auth(token))).status).toBe(200);
+      expect((await request(app).get('/api/courses').set(auth(token))).status).toBe(200);
+    }
+    expect((await request(app).get('/api/student/exams').set(auth(student))).status).toBe(200);
+  });
 });
 
 describe('enrolment and exam access', () => {
