@@ -419,8 +419,12 @@ model AuditLog {
 model Notification {
   id        String   @id @default(cuid())
   userId    String
+  /// English text
   title     String
   body      String
+  /// Somali text
+  titleSo   String   @default("")
+  bodySo    String   @default("")
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 
