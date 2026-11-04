@@ -14,9 +14,9 @@
  *      CS205 Quiz 2       - DRAFT with rules (exam builder demo)
  * Simulated attempts are generated with the same generator and grading code the app uses.
  */
-import { PrismaClient, type Question, type QuestionOption } from '@prisma/client';
+import { PrismaClient, type Prisma, type Question, type QuestionOption } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { validateQuestion } from '../src/core/questionRules';
 import { drawQuestions, type RuleSpec } from '../src/core/examGenerator';
 import { autoGrade, letterFor, percentage } from '../src/core/grading';
@@ -59,33 +59,43 @@ async function wipe() {
   ]);
 }
 
+/**
+ * Inserts a course's questions with two batched queries (fast on a remote database such
+ * as Supabase). IDs are generated here so options can reference their question.
+ */
 async function createQuestions(courseId: string, authorId: string, list: SeedQuestion[]): Promise<BankQ[]> {
   const out: BankQ[] = [];
+  const questionRows: Prisma.QuestionCreateManyInput[] = [];
+  const optionRows: Prisma.QuestionOptionCreateManyInput[] = [];
+  const createdAt = new Date();
   for (const q of list) {
     const errors = validateQuestion(q);
     if (errors.length) throw new Error(`Invalid seed question "${q.text}": ${errors.join(', ')}`);
-    const created = await prisma.question.create({
-      data: {
-        rootId: 'tmp',
-        courseId,
-        createdById: authorId,
-        type: q.type,
-        text: q.text,
-        marks: q.marks,
-        topic: q.topic,
-        difficulty: q.difficulty,
-        acceptedAnswers: q.acceptedAnswers ?? [],
-        rubric: q.rubric ? (q.rubric as object[]) : undefined,
-        options: { create: (q.options ?? []).map((o, i) => ({ text: o.text, isCorrect: o.isCorrect, position: i })) },
-      },
+    const id = randomUUID();
+    const options = (q.options ?? []).map((o, i) => ({ id: randomUUID(), questionId: id, text: o.text, isCorrect: o.isCorrect, position: i }));
+    questionRows.push({
+      id,
+      rootId: id,
+      courseId,
+      createdById: authorId,
+      type: q.type,
+      text: q.text,
+      marks: q.marks,
+      topic: q.topic,
+      difficulty: q.difficulty,
+      acceptedAnswers: q.acceptedAnswers ?? [],
+      rubric: q.rubric ? (q.rubric as object[]) : undefined,
+      createdAt,
     });
-    const full = await prisma.question.update({
-      where: { id: created.id },
-      data: { rootId: created.id },
-      include: { options: { orderBy: { position: 'asc' } } },
+    optionRows.push(...options);
+    out.push({
+      id, rootId: id, version: 1, isLatest: true, isArchived: false, courseId, createdById: authorId, createdAt,
+      type: q.type, text: q.text, imageUrl: null, marks: q.marks, topic: q.topic, difficulty: q.difficulty,
+      acceptedAnswers: q.acceptedAnswers ?? [], rubric: (q.rubric ?? null) as Prisma.JsonValue, options, p: q.p,
     });
-    out.push({ ...full, p: q.p });
   }
+  await prisma.question.createMany({ data: questionRows });
+  await prisma.questionOption.createMany({ data: optionRows });
   return out;
 }
 
@@ -113,29 +123,19 @@ async function simulateAttempt(o: SimOptions) {
   const used = Math.max(10, Math.floor(o.durationMinutes * (0.55 + rand() * 0.4)));
   const submittedAt = new Date(Math.min(startedAt.getTime() + used * MINUTE_MS, deadlineAt.getTime()));
   const auto = submittedAt.getTime() === deadlineAt.getTime();
-
-  const attempt = await prisma.examAttempt.create({
-    data: {
-      examId: o.examId,
-      studentId: o.studentId,
-      status: auto ? 'AUTO_SUBMITTED' : 'SUBMITTED',
-      startedAt,
-      deadlineAt,
-      submittedAt,
-      lastSeenAt: submittedAt,
-      ipAddress: `192.168.10.${randomInt(10, 200)}`,
-      maxScore: picked.reduce((s, q) => s + q.marks, 0),
-    },
-  });
+  const attemptId = randomUUID();
+  const maxScore = picked.reduce((s, q) => s + q.marks, 0);
+  // Built in memory, then written with a few batched queries (see the end of this function).
+  const paper: Prisma.AttemptQuestionCreateManyInput[] = [];
+  const answers: Prisma.AnswerCreateManyInput[] = [];
 
   let score = 0;
   let pending = false;
   for (let i = 0; i < picked.length; i++) {
     const q = picked[i];
     const order = q.type === 'MCQ' ? shuffle(q.options) : q.options;
-    const aq = await prisma.attemptQuestion.create({
-      data: { attemptId: attempt.id, questionId: q.id, position: i + 1, marks: q.marks, optionOrder: order.map((x) => x.id) },
-    });
+    const aq = { id: randomUUID() };
+    paper.push({ id: aq.id, attemptId, questionId: q.id, position: i + 1, marks: q.marks, optionOrder: order.map((x) => x.id) });
     const pCorrect = q.p ?? Math.min(0.97, o.ability * DIFF_FACTOR[q.difficulty] + 0.1);
     const correct = rand() < pCorrect;
     let selectedOptionId: string | null = null;
@@ -174,35 +174,47 @@ async function simulateAttempt(o: SimOptions) {
     }
     if (status === 'NEEDS_REVIEW') pending = true;
     score += awarded ?? 0;
-    await prisma.answer.create({
-      data: {
-        attemptQuestionId: aq.id,
-        selectedOptionId,
-        textAnswer,
-        savedAt: new Date(startedAt.getTime() + (i + 1) * 2 * MINUTE_MS),
-        status,
-        awardedMarks: awarded,
-        rubricScores: rubricScores ?? undefined,
-        comment,
-        gradedById: status === 'MANUALLY_GRADED' ? o.graderId : null,
-        gradedAt: status === 'MANUALLY_GRADED' ? new Date(submittedAt.getTime() + DAY) : null,
-      },
+    answers.push({
+      attemptQuestionId: aq.id,
+      selectedOptionId,
+      textAnswer,
+      savedAt: new Date(startedAt.getTime() + (i + 1) * 2 * MINUTE_MS),
+      status,
+      awardedMarks: awarded,
+      rubricScores: rubricScores ?? undefined,
+      comment,
+      gradedById: status === 'MANUALLY_GRADED' ? o.graderId : null,
+      gradedAt: status === 'MANUALLY_GRADED' ? new Date(submittedAt.getTime() + DAY) : null,
     });
   }
 
+  const focus: Prisma.FocusEventCreateManyInput[] = [];
   for (let k = 0; k < o.tabSwitches; k++) {
     const lostAt = new Date(startedAt.getTime() + randomInt(2, Math.max(3, used - 1)) * MINUTE_MS);
     const durationMs = k === 0 && o.tabSwitches > 1 ? 600 : randomInt(2000, 45000);
-    await prisma.focusEvent.create({
-      data: { attemptId: attempt.id, lostAt, regainedAt: new Date(lostAt.getTime() + durationMs), durationMs, counted: durationMs >= 1000 },
-    });
+    focus.push({ attemptId, lostAt, regainedAt: new Date(lostAt.getTime() + durationMs), durationMs, counted: durationMs >= 1000 });
   }
 
-  await prisma.examAttempt.update({
-    where: { id: attempt.id },
-    data: { score: Math.round(score * 100) / 100, gradingStatus: pending ? 'NEEDS_REVIEW' : 'GRADED' },
+  await prisma.examAttempt.create({
+    data: {
+      id: attemptId,
+      examId: o.examId,
+      studentId: o.studentId,
+      status: auto ? 'AUTO_SUBMITTED' : 'SUBMITTED',
+      startedAt,
+      deadlineAt,
+      submittedAt,
+      lastSeenAt: submittedAt,
+      ipAddress: `192.168.10.${randomInt(10, 200)}`,
+      maxScore,
+      score: Math.round(score * 100) / 100,
+      gradingStatus: pending ? 'NEEDS_REVIEW' : 'GRADED',
+    },
   });
-  return { attemptId: attempt.id, score, maxScore: picked.reduce((s, q) => s + q.marks, 0) };
+  await prisma.attemptQuestion.createMany({ data: paper });
+  await prisma.answer.createMany({ data: answers });
+  if (focus.length) await prisma.focusEvent.createMany({ data: focus });
+  return { attemptId, score, maxScore };
 }
 
 /** Today at hh:mm in Mogadishu time (UTC+3) + dayOffset days. */
@@ -252,14 +264,13 @@ async function main() {
     data: { username: 'sahra.ahmed', fullName: 'Sahra Ahmed Yusuf', role: 'INVIGILATOR', phone: '+252634000021', passwordHash: invHash },
   });
 
-  const students = [];
-  for (let i = 0; i < STUDENTS.length; i++) {
-    const [fullName, phone] = STUDENTS[i];
+  const students: { id: string; phone: string | null; studentId: string | null }[] = [];
+  const studentRows = STUDENTS.map(([fullName, phone], i) => {
     const sid = `JB-24-${String(i + 1).padStart(3, '0')}`;
-    students.push(
-      await prisma.user.create({ data: { username: sid.toLowerCase(), studentId: sid, fullName, phone, role: 'STUDENT', passwordHash: stuHash } }),
-    );
-  }
+    return { id: randomUUID(), username: sid.toLowerCase(), studentId: sid, fullName, phone, role: 'STUDENT' as const, passwordHash: stuHash };
+  });
+  await prisma.user.createMany({ data: studentRows });
+  students.push(...studentRows);
 
   const fcit = await prisma.faculty.create({ data: { code: 'FCIT', name: 'Faculty of Computing and Information Technology' } });
   const fba = await prisma.faculty.create({ data: { code: 'FBA', name: 'Faculty of Business and Accounting' } });
