@@ -1,0 +1,462 @@
+// Imtixaan - Online Exam Platform database schema.
+// Data access layer: only the backend service layer talks to these tables via Prisma.
+// Supabase: DATABASE_URL = pooled connection (port 6543, ?pgbouncer=true), DIRECT_URL = direct (5432) for migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Users and roles ----------
+
+enum Role {
+  ADMIN
+  LECTURER
+  STUDENT
+  INVIGILATOR
+}
+
+/// Every person who can log in. Role decides permissions (checked on the server).
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  email        String?
+  role         Role
+  /// University student ID (e.g. SIU-2024-0012). Unique, only set for students.
+  studentId    String?  @unique
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  coursesTaught      Course[]            @relation("CourseLecturer")
+  enrolments         Enrolment[]
+  questionsCreated   Question[]          @relation("QuestionAuthor")
+  examsCreated       Exam[]              @relation("ExamAuthor")
+  examsSecondGrader  Exam[]              @relation("ExamSecondGrader")
+  invigilating       ExamInvigilator[]
+  attempts           ExamAttempt[]
+  gradedAnswers      Answer[]            @relation("AnswerGrader")
+  notesWritten       InvigilatorNote[]
+  extensionsGranted  TimeExtension[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+  payments           Payment[]
+
+  @@index([role])
+}
+
+// ---------- Faculties, courses, enrolment ----------
+
+model Faculty {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  courses   Course[]
+}
+
+model Course {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  semester   String
+  facultyId  String
+  lecturerId String?
+  createdAt  DateTime @default(now())
+
+  faculty    Faculty     @relation(fields: [facultyId], references: [id])
+  lecturer   User?       @relation("CourseLecturer", fields: [lecturerId], references: [id])
+  enrolments Enrolment[]
+  questions  Question[]
+  exams      Exam[]
+
+  @@index([lecturerId])
+}
+
+enum EnrolmentStatus {
+  ACTIVE
+  DROPPED
+}
+
+/// Student <-> course link. Dropping keeps the row (status DROPPED) so past results survive.
+model Enrolment {
+  id         String          @id @default(cuid())
+  courseId   String
+  studentId  String
+  status     EnrolmentStatus @default(ACTIVE)
+  enrolledAt DateTime        @default(now())
+  droppedAt  DateTime?
+
+  course  Course @relation(fields: [courseId], references: [id])
+  student User   @relation(fields: [studentId], references: [id])
+
+  @@unique([courseId, studentId])
+  @@index([studentId])
+}
+
+/// Exam rooms with the campus network range their computers use.
+model Room {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  building  String
+  capacity  Int
+  /// IPv4 CIDR for the room's lab computers, e.g. 192.168.10.0/24
+  network   String?
+  createdAt DateTime   @default(now())
+  exams     ExamRoom[]
+}
+
+// ---------- Question bank ----------
+
+enum QuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+  ESSAY
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+/// A question version. Editing a question already used in an exam creates a new row
+/// (same rootId, version + 1, isLatest true) so past attempts keep the old text/answers.
+model Question {
+  id              String       @id @default(cuid())
+  rootId          String
+  version         Int          @default(1)
+  isLatest        Boolean      @default(true)
+  isArchived      Boolean      @default(false)
+  courseId        String
+  type            QuestionType
+  text            String
+  imageUrl        String?
+  marks           Float
+  topic           String
+  difficulty      Difficulty
+  /// Short answer: list of accepted answers (compared ignoring case and extra spaces)
+  acceptedAnswers String[]     @default([])
+  /// Essay: rubric as [{ criterion: string, points: number }]
+  rubric          Json?
+  createdById     String
+  createdAt       DateTime     @default(now())
+
+  course           Course            @relation(fields: [courseId], references: [id])
+  createdBy        User              @relation("QuestionAuthor", fields: [createdById], references: [id])
+  options          QuestionOption[]
+  attemptQuestions AttemptQuestion[]
+
+  @@index([courseId, isLatest, difficulty])
+  @@index([rootId])
+}
+
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String
+  text       String
+  isCorrect  Boolean  @default(false)
+  position   Int
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answers  Answer[]
+
+  @@index([questionId])
+}
+
+// ---------- Exams ----------
+
+enum ExamStatus {
+  DRAFT
+  PENDING_APPROVAL
+  SCHEDULED
+  REJECTED
+}
+
+model Exam {
+  id               String     @id @default(cuid())
+  courseId         String
+  title            String
+  instructions     String     @default("")
+  shuffleQuestions Boolean    @default(true)
+  shuffleOptions   Boolean    @default(true)
+  status           ExamStatus @default(DRAFT)
+  windowStart      DateTime?
+  windowEnd        DateTime?
+  durationMinutes  Int        @default(60)
+  /// Extra allowed IPv4 CIDRs/addresses (in addition to the rooms' networks). Empty + no rooms = any network.
+  allowedNetworks  String[]   @default([])
+  /// Students may review each question with the correct answer after publishing
+  allowReview      Boolean    @default(true)
+  resultsPublished Boolean    @default(false)
+  publishedAt      DateTime?
+  rejectionReason  String?
+  /// Optional second lecturer who grades essays blind (without student names)
+  secondGraderId   String?
+  createdById      String
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  course       Course            @relation(fields: [courseId], references: [id])
+  createdBy    User              @relation("ExamAuthor", fields: [createdById], references: [id])
+  secondGrader User?             @relation("ExamSecondGrader", fields: [secondGraderId], references: [id])
+  rules        ExamRule[]
+  rooms        ExamRoom[]
+  invigilators ExamInvigilator[]
+  attempts     ExamAttempt[]
+  notes        InvigilatorNote[]
+
+  @@index([courseId])
+  @@index([status, windowStart])
+}
+
+/// "N questions of difficulty D from topics [..]" (empty topics = any topic)
+model ExamRule {
+  id         String     @id @default(cuid())
+  examId     String
+  difficulty Difficulty
+  count      Int
+  topics     String[]   @default([])
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model ExamRoom {
+  examId String
+  roomId String
+  exam   Exam   @relation(fields: [examId], references: [id], onDelete: Cascade)
+  room   Room   @relation(fields: [roomId], references: [id])
+
+  @@id([examId, roomId])
+}
+
+model ExamInvigilator {
+  examId String
+  userId String
+  exam   Exam   @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@id([examId, userId])
+}
+
+// ---------- Attempts ----------
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  AUTO_SUBMITTED
+}
+
+enum GradingStatus {
+  PENDING
+  NEEDS_REVIEW
+  GRADED
+}
+
+/// One student's sitting of one exam. startedAt/deadlineAt are SERVER times - the source of truth for the timer.
+model ExamAttempt {
+  id            String        @id @default(cuid())
+  examId        String
+  studentId     String
+  status        AttemptStatus @default(IN_PROGRESS)
+  startedAt     DateTime      @default(now())
+  /// min(startedAt + duration, windowEnd) + extensions
+  deadlineAt    DateTime
+  extraMinutes  Int           @default(0)
+  submittedAt   DateTime?
+  lastSeenAt    DateTime      @default(now())
+  ipAddress     String?
+  score         Float?
+  maxScore      Float
+  gradingStatus GradingStatus @default(PENDING)
+
+  exam       Exam              @relation(fields: [examId], references: [id])
+  student    User              @relation(fields: [studentId], references: [id])
+  questions  AttemptQuestion[]
+  focusEvents FocusEvent[]
+  extensions TimeExtension[]
+  notes      InvigilatorNote[]
+  grade      Grade?
+
+  @@unique([examId, studentId])
+  @@index([status, deadlineAt])
+}
+
+/// The exact questions (and option order) generated for one attempt. Frozen at start.
+model AttemptQuestion {
+  id          String   @id @default(cuid())
+  attemptId   String
+  questionId  String
+  position    Int
+  /// Option ids in the order this student sees them
+  optionOrder String[] @default([])
+  marks       Float
+
+  attempt  ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id])
+  answer   Answer?
+
+  @@unique([attemptId, position])
+  @@index([questionId])
+}
+
+enum AnswerStatus {
+  UNGRADED
+  AUTO_GRADED
+  NEEDS_REVIEW
+  MANUALLY_GRADED
+}
+
+model Answer {
+  id                String       @id @default(cuid())
+  attemptQuestionId String       @unique
+  selectedOptionId  String?
+  textAnswer        String?
+  flagged           Boolean      @default(false)
+  savedAt           DateTime     @default(now())
+  status            AnswerStatus @default(UNGRADED)
+  awardedMarks      Float?
+  /// Essay rubric marks: [{ criterion, points, awarded }]
+  rubricScores      Json?
+  comment           String?
+  gradedById        String?
+  gradedAt          DateTime?
+
+  attemptQuestion AttemptQuestion @relation(fields: [attemptQuestionId], references: [id], onDelete: Cascade)
+  selectedOption  QuestionOption? @relation(fields: [selectedOptionId], references: [id])
+  gradedBy        User?           @relation("AnswerGrader", fields: [gradedById], references: [id])
+}
+
+/// The exam tab lost focus. durationMs < 1000 is logged but not counted.
+model FocusEvent {
+  id          String    @id @default(cuid())
+  attemptId   String
+  lostAt      DateTime  @default(now())
+  regainedAt  DateTime?
+  durationMs  Int?
+  counted     Boolean   @default(false)
+
+  attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+}
+
+model TimeExtension {
+  id          String   @id @default(cuid())
+  attemptId   String
+  minutes     Int
+  reason      String
+  grantedById String
+  createdAt   DateTime @default(now())
+
+  attempt   ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  grantedBy User        @relation(fields: [grantedById], references: [id])
+}
+
+model InvigilatorNote {
+  id        String   @id @default(cuid())
+  examId    String
+  attemptId String?
+  authorId  String
+  text      String
+  createdAt DateTime @default(now())
+
+  exam    Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  attempt ExamAttempt? @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  author  User         @relation(fields: [authorId], references: [id])
+}
+
+// ---------- Grades ----------
+
+/// University grade scale: a percentage >= minPercent earns this letter.
+model GradeScale {
+  id         String @id @default(cuid())
+  letter     String @unique
+  minPercent Float
+  points     Float
+}
+
+/// Final published result for an attempt. Written when results are published.
+model Grade {
+  id          String   @id @default(cuid())
+  attemptId   String   @unique
+  score       Float
+  maxScore    Float
+  percentage  Float
+  letter      String
+  publishedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Audit, notifications, simulated SMS and payments ----------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, read])
+}
+
+/// Simulated SMS: messages are written here instead of being sent.
+model SmsOutbox {
+  id        String   @id @default(cuid())
+  toPhone   String
+  message   String
+  provider  String   @default("mock")
+  status    String   @default("QUEUED")
+  createdAt DateTime @default(now())
+}
+
+enum PaymentProvider {
+  EVC_PLUS
+  ZAAD
+  EDAHAB
+}
+
+/// Simulated mobile-money payment (e.g. resit exam fee).
+model Payment {
+  id        String          @id @default(cuid())
+  userId    String
+  provider  PaymentProvider
+  phone     String
+  amount    Float
+  currency  String          @default("USD")
+  purpose   String
+  reference String          @unique
+  status    String          @default("SUCCESS")
+  createdAt DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}

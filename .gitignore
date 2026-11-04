@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# environment - never commit secrets
+.env
+.env.*
+!.env.example
+
+# local database data (embedded postgres)
+.pgdata/
+.pgdata-test/
+
+# logs and OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+coverage/
+.vscode/

@@ -1,0 +1,32 @@
+{
+  "name": "imtixaan-online-exam-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Imtixaan - fair, cheat-resistant online exam platform for campus networks",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace backend & npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "db:migrate": "npm run db:migrate --workspace backend",
+    "db:seed": "npm run db:seed --workspace backend",
+    "db:local": "npm run db:local --workspace backend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "test": "npm test --workspace backend",
+    "lint": "npm run lint --workspace backend && npm run lint --workspace frontend"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "@embedded-postgres/windows-x64@17.6.0-beta.15": true
+  }
+}
