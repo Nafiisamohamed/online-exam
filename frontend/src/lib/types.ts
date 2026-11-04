@@ -83,3 +83,6 @@ export interface Exam {
   feasibility?: Feasibility;
   bankSize?: number;
 }
+
+/** Badge colour for each exam status. */
+export const STATUS_TONE: Record<ExamStatus, 'gray' | 'amber' | 'green' | 'red'> = { DRAFT: 'gray', PENDING_APPROVAL: 'amber', SCHEDULED: 'green', REJECTED: 'red' };
